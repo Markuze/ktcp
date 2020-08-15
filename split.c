@@ -403,6 +403,85 @@ static inline void stop_sockets(void)
 	}
 }
 
+#if 1
+#define VEC_SZ 32
+
+int half_duplex(struct sockets *sock, struct cbn_qp *qp)
+{
+	struct kvec kvec[VEC_SZ];
+	int id = 0, i ,dir = sock->dir;
+	int rc;
+	uint64_t bytes = 0;
+
+	/*Allow to run on any core...*/
+	if ((rc = sched_setaffinity(0, cpu_possible_mask)))
+		TRACE_ERROR("Failed to sched_setaffinity! [%d]", rc);
+	rc = -ENOMEM;
+	for (i = 0; i < VEC_SZ; i++) {
+		kvec[i].iov_len = PAGE_SIZE;
+		/*TODO: In case of alloc failure put_qp is needed */
+		if (! (kvec[i].iov_base = page_address(alloc_page(GFP_KERNEL))))
+			goto err;
+	}
+	do {
+		struct msghdr msg = { 0 };
+		if ((rc = kernel_recvmsg(sock->rx, &msg, kvec, VEC_SZ, (PAGE_SIZE * VEC_SZ), 0)) <= 0) {
+			TRACE_DEBUG("%s [%s] (%d) at %s with %lld bytes", __FUNCTION__,
+					dir  ? "TX" : "RX", rc, id ? "Send" : "Rcv", bytes);
+			put_qp(qp);
+			/*
+			if (put_qp(qp)) {
+				//FIXME: Add per QP lock for shutdown sync.
+				//TOCTOU bug on sock_shutdown
+				kernel_sock_shutdown(sock->tx, SHUT_RDWR);
+				//kernel_sock_shutdown(sock->rx, SHUT_RDWR);
+				//sock-sk + sk_wake_async if shutdown fails.
+				//sk_wake_async(sock->tx->sk, SOCK_WAKE_URG, POLL_HUP);
+			}
+			*/
+			goto err;
+		}
+		bytes += rc;
+		id ^= 1;
+		if (msg.msg_flags)
+			TRACE_PRINT("[%s] GOT A FUCKING FLAG %d", id ? "Send" : "Rcv", msg.msg_flags);
+
+		//use kern_sendpage if flags needed.
+		if ((rc = kernel_sendmsg(sock->tx, &msg, kvec, VEC_SZ, rc)) <= 0) {
+			TRACE_PRINT("%s [%s] (%d) at %s with %lld bytes", __FUNCTION__,
+					dir  ? "TX" : "RX", rc, id ? "Send" : "Rcv", bytes);
+			put_qp(qp);
+			/*
+			if (put_qp(qp)) {
+				//sk_wake_async(sock->rx->sk, SOCK_WAKE_URG, POLL_HUP);
+				kernel_sock_shutdown(sock->rx, SHUT_RDWR);
+				//kernel_sock_shutdown(sock->tx, SHUT_RDWR);
+			}
+			*/
+			goto err;
+		}
+		id ^= 1;
+		if (msg.msg_flags)
+			TRACE_PRINT("[%s] GOT A FUCKING FLAG %d", id ? "Send" : "Rcv", msg.msg_flags);
+
+	} while (!kthread_should_stop());
+
+err:
+	if (rc) {
+		TRACE_PRINT("%s [%s] stopping on error (%d) at %s with %lld bytes", __FUNCTION__,
+				dir  ? "TX" : "RX", rc, id ? "Send" : "Rcv", bytes);
+	} else {
+		TRACE_DEBUG("%s [%s] stopping (%d) at %s with %lld bytes", __FUNCTION__,
+				dir  ? "TX" : "RX", rc, id ? "Send" : "Rcv", bytes);
+	}
+	for (i = 0; i < VEC_SZ; i++)
+		free_page((unsigned long)(kvec[i].iov_base));
+
+	return rc;
+}
+
+
+#else
 //implementing binary search
 static inline int get_kvec_len(struct kvec *kvec, unsigned long len)
 {
@@ -503,6 +582,7 @@ err:
 
 	return rc;
 }
+#endif
 
 inline struct cbn_qp *qp_exists(struct cbn_qp* pqp, uint8_t dir)
 {
