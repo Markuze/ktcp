@@ -857,7 +857,7 @@ static int start_new_connection(void *arg)
 
 	line = __LINE__;
 	//if ((rc = kernel_getpeername(rx, (struct sockaddr *)&cli_addr, &size))) {
-	if ((rc = kernel_getpeername(rx, (struct sockaddr *)&cli_addr))) {
+	if ((rc = kernel_getpeername(rx, (struct sockaddr *)&cli_addr)) < 0) {
 		TRACE_ERROR("error (%d)\n", rc);
 		goto create_fail;
 	}
