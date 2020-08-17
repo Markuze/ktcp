@@ -33,6 +33,6 @@ The **env** directory contains sripts that can be used to bring-up a test enviro
     (Please update the ssh\_console.sh script with your VM info: key/user/region/etc...)
 
 ## Zero Copy
-	The split.c file includea a version of the zero-copy half\_duplex function.
+	The split.c file includes a version of the zero-copy half\_duplex function.
 	This version depends on a modified kernel with a modified send_msg function. 
 	The code can be trivialy addopted to use send\_page instead.
